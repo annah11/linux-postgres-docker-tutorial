@@ -1,0 +1,82 @@
+# FND-02: PostgreSQL 16 + Hasura GraphQL Engine + pgAdmin
+# Start:  docker compose up -d
+# Status: docker compose ps
+# Logs:   docker compose logs -f           (all services)
+#         docker compose logs -f hasura    (one service)
+# Stop:   docker compose down              (keeps data)
+# Reset:  docker compose down -v           (DELETES named volumes)
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No published port: Hasura and pgAdmin reach "db:5432" on the internal network.
+    # To connect a tool from your own machine, uncomment (host port 5433 avoids
+    # clashing with anything already on 5432):
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+    healthcheck:
+      # $$ makes the CONTAINER read the variable, not Compose
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+
+  hasura:
+    # Pin a version you have tested; check https://hub.docker.com/r/hasura/graphql-engine/tags
+    image: hasura/graphql-engine:v2.48.12
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:8080"   # host 8081 -> container 8080 (host 8080 may already be in use)
+    environment:
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      PG_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+    healthcheck:
+      # Assumes curl exists in the image. If `docker compose ps` shows "unhealthy"
+      # with an exec error, remove this block (nothing depends on it).
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *default-logging
+
+  pgadmin:
+    # Pin to a tested tag instead of latest once it works for you
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  pgadmin-data:
