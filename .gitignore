@@ -7,3 +7,4 @@ id_rsa
 *.log
 node_modules/
 .DS_Store
+*.tar
